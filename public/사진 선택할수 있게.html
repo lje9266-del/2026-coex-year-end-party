@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GAMCO 셀프 네컷</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:#000;color:#fff;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{display:flex;justify-content:center;align-items:center}
+#booth{position:relative;aspect-ratio:1024/1536;height:100%;max-width:100%;max-height:100%;background:url(bg.png) center/100% 100% no-repeat}
+#booth>*{position:absolute}
+.slot{background:#c9c2ee;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#7a6fc0;font-weight:700;font-size:2.2vh}
+.slot img{width:100%;height:100%;object-fit:cover}
+.hit{background:transparent;border:0;border-radius:14px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.hit:active{background:rgba(255,255,255,.35)}
+#cam,#res{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9}
+#cam.on,#res.on{display:flex}
+#vwrap{position:relative;width:min(92vw,70vh*1.547);aspect-ratio:232/150;background:#111;border-radius:12px;overflow:hidden}
+video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#cnt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:20vh;font-weight:800;text-shadow:0 0 20px #2a6cf0}
+#flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+.btn{padding:10px 22px;border-radius:999px;border:0;background:#3b82f6;color:#fff;font-size:16px;cursor:pointer}
+.btn.g{background:#444}
+#lm,#vw{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9;text-align:center;padding:16px;box-sizing:border-box}
+#lm.on,#vw.on{display:flex}
+#qr{width:min(60vw,46vh);image-rendering:pixelated;background:#fff;border-radius:12px;padding:8px}
+#lnk{width:min(86vw,360px);padding:9px 12px;border-radius:10px;border:0;background:#1e293b;color:#fff;font-size:13px}
+#vimg{max-width:88vw;max-height:70vh;border-radius:10px}
+.ico{pointer-events:none}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#2563eb;padding:10px 18px;border-radius:999px;font-size:14px;opacity:0;transition:.3s;z-index:20;pointer-events:none;max-width:90vw;text-align:center}
+#toast.on{opacity:1}
+</style></head><body>
+<div id="booth"></div>
+<div id="cam"><div id="vwrap"><video id="v" autoplay playsinline muted></video><div id="cnt"></div><div id="flash"></div></div><div id="info">준비하세요!</div><button class="btn g" id="cancel">취소</button></div>
+<div id="lm"><div style="font-size:18px;font-weight:700">휴대폰 카메라로 스캔하세요</div><img id="qr" alt="QR"><input id="lnk" readonly><div style="display:flex;gap:10px"><button class="btn" id="cp">링크 복사</button><button class="btn g" id="lc">닫기</button></div></div>
+<div id="vw"><div id="vm">불러오는 중…</div><img id="vimg" alt="네컷사진" hidden><button class="btn" id="vs" hidden>사진 저장</button></div>
+<input type="file" id="file" accept="image/*" multiple hidden>
+<div id="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+const BG="bg.png",W=1024,H=1536,SX=300,SW=232,SH=150,SY=[666,827,989,1150];
+const booth=document.getElementById('booth'),photos=[null,null,null,null];
+function place(el,x,y,w,h){el.style.left=x/W*100+'%';el.style.top=y/H*100+'%';el.style.width=w/W*100+'%';el.style.height=h/H*100+'%'}
+const slots=SY.map((y,i)=>{const d=document.createElement('div');d.className='slot';d.textContent=i+1;place(d,SX,y,SW,SH);booth.appendChild(d);return d});
+function hit(x,y,w,h,label,fn){const b=document.createElement('button');b.className='hit';b.setAttribute('aria-label',label);place(b,x,y,w,h);b.onclick=fn;booth.appendChild(b)}
+let ver=0;function render(){ver++;slots.forEach((s,i)=>{s.innerHTML='';if(photos[i]){const im=new Image();im.src=photos[i];s.appendChild(im)}else s.textContent=i+1})}
+function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('on'),2600)}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let stream=null,cancelled=false;
+const cam=document.getElementById('cam'),v=document.getElementById('v'),cnt=document.getElementById('cnt'),info=document.getElementById('info'),flash=document.getElementById('flash');
+function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}cam.classList.remove('on')}
+function snap(){const c=document.createElement('canvas');c.width=928;c.height=600;const x=c.getContext('2d');
+  const vw=v.videoWidth,vh=v.videoHeight,r=SW/SH;let sw=vw,sh=vw/r;if(sh>vh){sh=vh;sw=vh*r}
+  x.translate(c.width,0);x.scale(-1,1);x.drawImage(v,(vw-sw)/2,(vh-sh)/2,sw,sh,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.92)}
+async function startShoot(){
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280}},audio:false})}
+  catch(e){toast('카메라를 사용할 수 없어요. 권한을 확인하거나 갤러리를 이용해 주세요.');return}
+  cancelled=false;v.srcObject=stream;cam.classList.add('on');await v.play().catch(()=>{});await sleep(800);
+  for(let i=0;i<4&&!cancelled;i++){
+    info.textContent=(i+1)+' / 4 컷';
+    for(let n=3;n>0&&!cancelled;n--){cnt.textContent=n;await sleep(1000)}
+    if(cancelled)break;cnt.textContent='';
+    photos[i]=snap();flash.style.transition='none';flash.style.opacity=1;await sleep(60);flash.style.transition='opacity .4s';flash.style.opacity=0;render();await sleep(700);
+  }
+  stopCam();if(!cancelled)toast('촬영 완료! 오른쪽 아래 아이콘으로 저장하세요');
+}
+document.getElementById('cancel').onclick=()=>{cancelled=true;stopCam()};
+const file=document.getElementById('file');
+let target=null;
+file.onchange=async()=>{const fs=[...file.files];file.value='';if(!fs.length)return;
+  const urls=await Promise.all(fs.map(f=>new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsDataURL(f)})));
+  if(target!==null){photos[target]=urls[0];target=null;render();toast('사진을 바꿨어요');return}
+  let empty=photos.map((p,i)=>p?-1:i).filter(i=>i>=0);
+  if(!empty.length){photos.fill(null);empty=[0,1,2,3]}
+  const n=Math.min(empty.length,urls.length);
+  for(let k=0;k<n;k++)photos[empty[k]]=urls[k];
+  render();const left=photos.filter(p=>!p).length;
+  toast(n+'장 넣었어요'+(urls.length>n?' (넘치는 '+(urls.length-n)+'장은 제외)':'')+(left?' · 빈 칸 '+left+'개':' · 4칸 완성!'))};
+slots.forEach((s,i)=>{s.style.cursor='pointer';s.onclick=()=>{target=i;file.click()}});
+function loadImg(src){return new Promise(r=>{const i=new Image();i.onload=()=>r(i);i.src=src})}
+const CX=222,CY=551,CW=388,CH=856; // 저장 이미지는 프레임 부분만 잘라서 사용
+async function composite(s=2){
+  const o=document.createElement('canvas');o.width=CW*s;o.height=CH*s;const x=o.getContext('2d');
+  x.imageSmoothingQuality='high';x.scale(s,s);x.translate(-CX,-CY);
+  x.drawImage(await loadImg(BG),0,0,W,H);
+  for(let i=0;i<4;i++){x.fillStyle='#c9c2ee';x.fillRect(SX,SY[i],SW,SH);
+    if(photos[i]){const im=await loadImg(photos[i]),r=SW/SH;let sw=im.width,sh=sw/r;if(sh>im.height){sh=im.height;sw=sh*r}
+      x.drawImage(im,(im.width-sw)/2,(im.height-sh)/2,sw,sh,SX,SY[i],SW,SH)}}
+  return o}
+let cache={ver:-1,url:null};
+async function makeLink(){
+  if(!photos.some(Boolean)){toast('먼저 사진을 찍거나 불러와 주세요');return null}
+  if(cache.ver===ver)return cache.url;
+  toast('링크를 만드는 중…');
+  try{const o=await composite(2);const blob=await new Promise(r=>o.toBlob(r,'image/jpeg',.92));
+    const r=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'image/jpeg'},body:blob});
+    if(!r.ok)throw 0;const j=await r.json();cache={ver,url:j.url};return j.url}
+  catch(e){toast('업로드에 실패했어요. 다시 시도해 주세요');return null}}
+const lm=document.getElementById('lm');
+function openLink(url){const q=qrcode(0,'M');q.addData(url);q.make();
+  document.getElementById('qr').src=q.createDataURL(8,2);document.getElementById('lnk').value=url;lm.classList.add('on')}
+document.getElementById('lc').onclick=()=>lm.classList.remove('on');
+document.getElementById('cp').onclick=async()=>{const i=document.getElementById('lnk');
+  try{await navigator.clipboard.writeText(i.value)}catch(e){i.select();document.execCommand('copy')}toast('링크를 복사했어요')};
+async function showQR(){const u=await makeLink();if(u)openLink(u)}
+async function share(){const u=await makeLink();if(!u)return;
+  if(navigator.share){try{await navigator.share({title:'GAMCO 셀프 네컷',text:'내 네컷사진 받기 📸',url:u});return}catch(e){if(e.name==='AbortError')return}}
+  openLink(u);toast('공유 기능을 쓸 수 없어 링크를 보여드려요')}
+const ICO={qr:'<svg viewBox="0 0 64 64" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="21" height="21" rx="3"/><rect x="38" y="5" width="21" height="21" rx="3"/><rect x="5" y="38" width="21" height="21" rx="3"/><path d="M13 14h5M46 14h5M13 47h5M38 38h8v8M59 38v.1M52 52h7v7M38 55v4" /></svg>',
+ sh:'<svg viewBox="0 0 64 64" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 28h-9a3 3 0 0 0-3 3v24a3 3 0 0 0 3 3h38a3 3 0 0 0 3-3V31a3 3 0 0 0-3-3h-9"/><path d="M32 40V6M21 16 32 5l11 11"/></svg>'};
+[[ICO.qr,1031],[ICO.sh,1190]].forEach(([s,y])=>{const d=document.createElement('div');d.className='ico';d.innerHTML=s;place(d,696,y,66,66);booth.appendChild(d)});
+hit(645,627,172,173,'촬영',startShoot);
+hit(662,839,135,132,'갤러리',()=>{target=null;file.click()});
+hit(662,998,135,132,'QR 코드',showQR);
+hit(662,1157,135,133,'공유하기',share);
+</script></body></html>
